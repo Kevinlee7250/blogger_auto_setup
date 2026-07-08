@@ -7,6 +7,14 @@ Claude API로 페이지 HTML 콘텐츠 생성 후 Blogger Pages API로 발행합
 중복 방지: 이미 같은 제목의 페이지가 있으면 건너뜁니다.
 """
 
+import sys
+import io
+# Windows cp949 환경에서 유니코드 출력을 위해 UTF-8 강제 설정
+if hasattr(sys.stdout, 'buffer'):
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+if hasattr(sys.stderr, 'buffer'):
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
 import time
 import anthropic
 from rich.console import Console
@@ -15,7 +23,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from auth import get_blogger_service
 import config
 
-console = Console()
+console = Console(legacy_windows=False)
 
 
 # ─────────────────────────────────────────────────────────────
@@ -175,7 +183,7 @@ def generate_page_content(client, page_key: str) -> str:
     )
 
     message = client.messages.create(
-        model   = "claude-sonnet-4-5",
+        model   = "claude-haiku-4-5-20251001",
         max_tokens = 2000,
         messages = [{"role": "user", "content": prompt}]
     )
@@ -210,7 +218,7 @@ def publish_page(service, title: str, html_content: str) -> dict:
 # ─────────────────────────────────────────────────────────────
 
 def run(service=None):
-    console.rule("[bold blue]STEP 3 — 필수 페이지 자동 생성 & 발행")
+    console.rule("[bold blue]STEP 3 - 필수 페이지 자동 생성 & 발행")
 
     if service is None:
         service = get_blogger_service()
@@ -220,7 +228,7 @@ def run(service=None):
         console.print("[red]❌ ANTHROPIC_API_KEY 가 설정되지 않았습니다. .env 파일을 확인하세요.[/red]")
         return
 
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=60)
 
     # ── 기발행 페이지 확인 (중복 방지) ──
     console.print("\n[yellow]▶ 기발행 페이지 목록 조회 중...[/yellow]")
