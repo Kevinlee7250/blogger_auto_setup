@@ -1,0 +1,88 @@
+name: Blogger Setup Pipeline
+
+# ── 트리거: GitHub 웹 UI에서 수동 실행 ────────────────────────
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: '실행할 스텝을 선택하세요'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all       # 전체 파이프라인 (1 → 2 → 3)
+          - step1     # 블로그 연결 확인만
+          - step2     # CSS 테마 적용만
+          - step3     # 필수 페이지 생성만
+
+# ── 환경변수: GitHub Secrets & Variables에서 주입 ─────────────
+env:
+  BLOG_ID:             ${{ secrets.BLOG_ID }}
+  ANTHROPIC_API_KEY:   ${{ secrets.ANTHROPIC_API_KEY }}
+  BLOG_NAME:           ${{ vars.BLOG_NAME }}
+  BLOG_DESCRIPTION:    ${{ vars.BLOG_DESCRIPTION }}
+  BLOG_EMAIL:          ${{ vars.BLOG_EMAIL }}
+  BLOG_URL:            ${{ vars.BLOG_URL }}
+  BLOG_NICHE:          ${{ vars.BLOG_NICHE }}
+  BLOG_AUTHOR_NAME:    ${{ vars.BLOG_AUTHOR_NAME }}
+
+jobs:
+  run-pipeline:
+    name: 블로거 자동화 파이프라인
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 저장소 체크아웃
+      - name: 📥 저장소 체크아웃
+        uses: actions/checkout@v4
+
+      # 2. Python 설정
+      - name: 🐍 Python 3.11 설정
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      # 3. 의존성 설치
+      - name: 📦 의존성 설치
+        run: |
+          pip install -r requirements.txt
+          # Flask는 Actions에서 불필요하므로 선택적 설치
+          pip install google-auth-oauthlib google-auth-httplib2 google-api-python-client anthropic python-dotenv rich
+
+      # 4. Google 인증 파일 복원 (Base64 디코딩)
+      - name: 🔐 Google 인증 파일 복원
+        env:
+          GOOGLE_CREDENTIALS_B64: ${{ secrets.GOOGLE_CREDENTIALS_B64 }}
+          GOOGLE_TOKEN_B64:       ${{ secrets.GOOGLE_TOKEN_B64 }}
+        run: |
+          echo "$GOOGLE_CREDENTIALS_B64" | base64 -d > credentials.json
+          echo "$GOOGLE_TOKEN_B64"       | base64 -d > token.pickle
+          echo "✅ credentials.json, token.pickle 복원 완료"
+
+      # 5. 파이프라인 실행
+      - name: 🚀 파이프라인 실행
+        run: |
+          STEP="${{ github.event.inputs.step }}"
+          echo "📌 실행 스텝: $STEP"
+
+          case "$STEP" in
+            step1) python step1_verify.py ;;
+            step2) python step2_theme.py  ;;
+            step3) python step3_pages.py  ;;
+            all)   python main.py         ;;
+            *)
+              echo "❌ 알 수 없는 스텝: $STEP"
+              exit 1
+              ;;
+          esac
+
+      # 6. 갱신된 토큰 저장 (OAuth 자동 갱신 대응)
+      - name: 💾 갱신된 OAuth 토큰 아티팩트 저장
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: google-oauth-token
+          path: token.pickle
+          retention-days: 30
+          if-no-files-found: ignore

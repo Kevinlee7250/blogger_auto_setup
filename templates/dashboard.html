@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ blog_name }} — 대시보드</title>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            brand: '#2563eb',
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Alpine.js -->
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+  <style>
+    [x-cloak] { display: none !important; }
+
+    /* 스크롤바 커스텀 */
+    .log-viewer::-webkit-scrollbar { width: 4px; }
+    .log-viewer::-webkit-scrollbar-track { background: #020617; }
+    .log-viewer::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
+
+    /* 스피너 */
+    .spin { display: inline-block; animation: spin 0.8s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* 실행 중 상태 펄스 */
+    .pulse-dot { animation: pulsedot 1.5s ease-in-out infinite; }
+    @keyframes pulsedot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+    /* 진행바 전환 */
+    .progress-bar { transition: width 0.5s ease; }
+
+    /* 사이드바 링크 hover */
+    .nav-link { transition: background 0.15s, color 0.15s; }
+  </style>
+</head>
+
+<body class="bg-slate-950 text-slate-100 font-sans antialiased"
+      x-data="dashApp()"
+      x-init="init()"
+      x-cloak>
+
+  <!-- ── 사이드바 ─────────────────────────────────────────── -->
+  <aside class="fixed inset-y-0 left-0 w-56 bg-slate-900 border-r border-slate-800 flex flex-col z-20">
+
+    <!-- 로고 -->
+    <div class="p-4 border-b border-slate-800">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold text-sm select-none">B</div>
+        <div>
+          <div class="text-sm font-bold text-white leading-tight">Auto Setup</div>
+          <div class="text-xs text-slate-500 leading-tight">Blogger Dashboard</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 블로그 정보 -->
+    <div class="p-4 border-b border-slate-800">
+      <div class="text-xs text-slate-500 mb-1">현재 블로그</div>
+      <div class="text-sm font-semibold text-white truncate">{{ blog_name }}</div>
+      {% if blog_url and blog_url != '#' %}
+      <a href="{{ blog_url }}" target="_blank"
+         class="text-xs text-blue-400 hover:text-blue-300 flex items-center gap-1 mt-1 transition-colors">
+        블로그 방문 →
+      </a>
+      {% endif %}
+      <div class="text-xs text-slate-600 mt-1">{{ blog_niche }}</div>
+    </div>
+
+    <!-- 네비게이션 -->
+    <nav class="p-3 flex-1 space-y-1">
+      <a href="#stats" class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium text-white bg-slate-800">
+        <span>📊</span> 대시보드
+      </a>
+      <a href="#pipeline" class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800">
+        <span>⚙️</span> 파이프라인
+      </a>
+      <a href="#pages-section" class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800">
+        <span>📄</span> 페이지 관리
+      </a>
+      <a href="#logs-section" class="nav-link flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm text-slate-400 hover:text-white hover:bg-slate-800">
+        <span>📋</span> 실행 로그
+      </a>
+    </nav>
+
+    <!-- 버전 -->
+    <div class="p-4 border-t border-slate-800">
+      <div class="text-xs text-slate-700">v1.0 · AdSense 자동화</div>
+      <div class="flex items-center gap-1.5 mt-1">
+        <div class="w-1.5 h-1.5 rounded-full" :class="logConnected ? 'bg-green-500' : 'bg-red-500 pulse-dot'"></div>
+        <span class="text-xs text-slate-600" x-text="logConnected ? '스트림 연결됨' : '연결 끊김'"></span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── 메인 콘텐츠 ─────────────────────────────────────── -->
+  <main class="ml-56 min-h-screen">
+
+    <!-- 상단 바 -->
+    <header class="sticky top-0 z-10 bg-slate-900/95 backdrop-blur border-b border-slate-800 px-6 py-3 flex items-center justify-between">
+      <div>
+        <h1 class="text-base font-bold text-white">대시보드</h1>
+        <p class="text-xs text-slate-500">애드센스 승인 자동화 파이프라인</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <!-- 새로고침 -->
+        <button @click="refresh()"
+          class="flex items-center gap-1.5 px-3 py-1.5 text-xs text-slate-400 hover:text-white rounded-lg border border-slate-700 hover:border-slate-600 transition">
+          <span :class="loading ? 'spin' : ''">↻</span> 새로고침
+        </button>
+        <!-- 전체 실행 -->
+        <button @click="runAll()" :disabled="anyRunning"
+          class="flex items-center gap-2 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg transition">
+          <span x-show="anyRunning" class="spin">⟳</span>
+          <span>▶ 전체 실행 (1→2→3)</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="p-6 space-y-6">
+
+      <!-- ── 통계 카드 ───────────────────────────────────── -->
+      <section id="stats" class="grid grid-cols-4 gap-4">
+
+        <!-- 게시물 수 -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <div class="text-2xl mb-2">✍️</div>
+          <div class="text-3xl font-bold text-white tabular-nums" x-text="stats.loading ? '…' : stats.posts">…</div>
+          <div class="text-xs text-slate-500 mt-1.5">게시물</div>
+        </div>
+
+        <!-- 페이지 수 -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <div class="text-2xl mb-2">📄</div>
+          <div class="text-3xl font-bold text-white tabular-nums" x-text="stats.loading ? '…' : stats.pages">…</div>
+          <div class="text-xs text-slate-500 mt-1.5">페이지</div>
+          <div class="text-xs mt-1" :class="stats.pages >= 4 ? 'text-green-500' : 'text-amber-500'"
+               x-text="stats.pages >= 4 ? '✅ 조건 충족' : `⚠️ ${stats.pages}/4 (4개 필요)`">
+          </div>
+        </div>
+
+        <!-- 파이프라인 진행률 -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <div class="text-2xl mb-2">🎯</div>
+          <div class="text-3xl font-bold text-white tabular-nums" x-text="setupProgress + '%'">0%</div>
+          <div class="text-xs text-slate-500 mt-1.5">파이프라인 완료</div>
+          <div class="mt-2.5 h-1 bg-slate-800 rounded-full overflow-hidden">
+            <div class="h-full bg-blue-500 rounded-full progress-bar" :style="`width:${setupProgress}%`"></div>
+          </div>
+        </div>
+
+        <!-- 마지막 업데이트 -->
+        <div class="bg-slate-900 border border-slate-800 rounded-xl p-5">
+          <div class="text-2xl mb-2">🕐</div>
+          <div class="text-sm font-bold text-white leading-snug" x-text="stats.updated || '—'">—</div>
+          <div class="text-xs text-slate-500 mt-1.5">마지막 업데이트</div>
+        </div>
+      </section>
+
+      <!-- ── 파이프라인 스텝 ────────────────────────────── -->
+      <section id="pipeline">
+        <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest mb-3">파이프라인 단계</h2>
+        <div class="grid grid-cols-3 gap-4">
+
+          <!-- 스텝 카드 (공통 템플릿을 반복) -->
+          <template x-for="(step, key) in {
+            step1: { label: 'STEP 1', title: '블로그 연결 확인', desc: 'Google OAuth 인증 & 블로그 기본 정보 리포트', icon: '🔍' },
+            step2: { label: 'STEP 2', title: '커스텀 CSS 테마', desc: '반응형 AdSense 최적화 CSS 생성 & 적용 가이드', icon: '🎨' },
+            step3: { label: 'STEP 3', title: '필수 페이지 생성', desc: 'Claude AI로 4개 필수 페이지 자동 생성 & 발행', icon: '🤖' }
+          }" :key="key">
+            <div class="bg-slate-900 border rounded-xl p-5 transition-all duration-300"
+                 :class="cardBorder(key)">
+
+              <!-- 헤더: 라벨 + 상태 -->
+              <div class="flex items-center justify-between mb-4">
+                <span class="text-xs font-mono bg-slate-800 text-slate-400 px-2 py-0.5 rounded"
+                      x-text="step.label"></span>
+                <div class="flex items-center gap-1.5">
+                  <div class="w-2 h-2 rounded-full transition-colors"
+                       :class="[dotColor(key), steps[key].status === 'running' ? 'pulse-dot' : '']"></div>
+                  <span class="text-xs font-medium" :class="labelColor(key)"
+                        x-text="statusText(key)"></span>
+                </div>
+              </div>
+
+              <!-- 아이콘 + 제목 -->
+              <div class="text-xl mb-1" x-text="step.icon"></div>
+              <h3 class="text-sm font-bold text-white mb-1" x-text="step.title"></h3>
+              <p class="text-xs text-slate-500 mb-3 leading-relaxed" x-text="step.desc"></p>
+
+              <!-- 마지막 실행 시간 -->
+              <div class="text-xs text-slate-700 mb-3"
+                   x-text="steps[key].last_run ? '마지막 실행: ' + steps[key].last_run : '미실행'"></div>
+
+              <!-- 실행 버튼 -->
+              <button @click="runStep(key)" :disabled="steps[key].status === 'running'"
+                class="w-full py-2 text-xs font-medium rounded-lg border transition-all"
+                :class="steps[key].status === 'running'
+                  ? 'border-yellow-800 text-yellow-500 opacity-75 cursor-not-allowed'
+                  : 'border-blue-800 text-blue-400 hover:bg-blue-950/50 hover:border-blue-600'">
+                <span x-show="steps[key].status !== 'running'">▶ 실행</span>
+                <span x-show="steps[key].status === 'running'">
+                  <span class="spin">⟳</span> 실행 중...
+                </span>
+              </button>
+            </div>
+          </template>
+
+        </div>
+      </section>
+
+      <!-- ── 하단: 페이지 목록 + 로그 뷰어 ─────────────── -->
+      <div class="grid grid-cols-2 gap-5">
+
+        <!-- 페이지 목록 -->
+        <section id="pages-section">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest">발행된 페이지</h2>
+            <button @click="loadPages()"
+              class="text-xs text-slate-600 hover:text-slate-300 transition-colors">↻ 새로고침</button>
+          </div>
+
+          <div class="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
+
+            <!-- 빈 상태 -->
+            <div x-show="pages.length === 0" class="py-10 text-center">
+              <div class="text-3xl mb-2">📭</div>
+              <div class="text-sm text-slate-600">발행된 페이지 없음</div>
+              <div class="text-xs text-slate-700 mt-1">STEP 3을 실행해서 4개 필수 페이지를 생성하세요</div>
+            </div>
+
+            <!-- 페이지 테이블 -->
+            <table x-show="pages.length > 0" class="w-full">
+              <thead>
+                <tr class="border-b border-slate-800">
+                  <th class="px-4 py-2.5 text-left text-xs font-medium text-slate-500">제목</th>
+                  <th class="px-4 py-2.5 text-left text-xs font-medium text-slate-500">발행일</th>
+                  <th class="px-4 py-2.5 text-right text-xs font-medium text-slate-500">작업</th>
+                </tr>
+              </thead>
+              <tbody>
+                <template x-for="page in pages" :key="page.id">
+                  <tr class="border-b border-slate-800 last:border-0 hover:bg-slate-800/40 transition-colors">
+                    <td class="px-4 py-3">
+                      <a :href="page.url" target="_blank"
+                         class="text-sm text-white hover:text-blue-400 transition-colors flex items-center gap-1">
+                        <span x-text="page.title"></span>
+                        <span class="text-slate-700 text-xs">↗</span>
+                      </a>
+                    </td>
+                    <td class="px-4 py-3 text-xs text-slate-600" x-text="page.published"></td>
+                    <td class="px-4 py-3 text-right">
+                      <button @click="deletePage(page.id, page.title)"
+                        class="text-xs text-red-500 hover:text-red-400 px-2 py-1 rounded border border-red-900 hover:border-red-700 transition">
+                        삭제
+                      </button>
+                    </td>
+                  </tr>
+                </template>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- 애드센스 체크리스트 -->
+          <div class="mt-3 bg-slate-900/50 border border-slate-800 rounded-xl p-4">
+            <div class="text-xs font-semibold text-slate-500 mb-2.5 uppercase tracking-wider">애드센스 승인 체크리스트</div>
+            <div class="space-y-1.5">
+              <template x-for="item in adsenseChecklist" :key="item.label">
+                <div class="flex items-center gap-2 text-xs">
+                  <span x-text="item.done ? '✅' : '⏳'" class="shrink-0"></span>
+                  <span :class="item.done ? 'text-slate-300' : 'text-slate-500'" x-text="item.label"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </section>
+
+        <!-- 로그 뷰어 -->
+        <section id="logs-section">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-xs font-semibold text-slate-500 uppercase tracking-widest">실행 로그</h2>
+            <div class="flex items-center gap-3">
+              <div class="flex items-center gap-1.5">
+                <div class="w-1.5 h-1.5 rounded-full" :class="logConnected ? 'bg-green-500' : 'bg-red-500 pulse-dot'"></div>
+                <span class="text-xs text-slate-600" x-text="logConnected ? 'LIVE' : '연결 끊김'"></span>
+              </div>
+              <button @click="clearLogs()" class="text-xs text-slate-600 hover:text-slate-300 transition-colors">
+                지우기
+              </button>
+            </div>
+          </div>
+
+          <!-- 터미널 스타일 로그 -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
+            <!-- 터미널 상단 바 -->
+            <div class="flex items-center gap-1.5 px-4 py-2 border-b border-slate-800 bg-slate-900">
+              <div class="w-3 h-3 rounded-full bg-red-500/60"></div>
+              <div class="w-3 h-3 rounded-full bg-yellow-500/60"></div>
+              <div class="w-3 h-3 rounded-full bg-green-500/60"></div>
+              <span class="ml-2 text-xs text-slate-600 font-mono">blogger_pipeline.log</span>
+            </div>
+
+            <!-- 로그 내용 -->
+            <div class="h-72 overflow-y-auto p-4 font-mono text-xs log-viewer" x-ref="logContainer">
+              <div x-show="logs.length === 0" class="text-slate-700 py-8 text-center">
+                파이프라인을 실행하면 여기에 실시간 출력이 표시됩니다...
+              </div>
+              <template x-for="(log, i) in logs" :key="i">
+                <div class="flex gap-2.5 mb-0.5 leading-5">
+                  <span class="text-slate-700 shrink-0 select-none" x-text="log.time"></span>
+                  <span :class="logColor(log.level)" x-text="log.msg" class="break-all"></span>
+                </div>
+              </template>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </main>
+
+
+  <!-- ── Alpine.js 앱 로직 ─────────────────────────────────── -->
+  <script>
+  function dashApp() {
+    return {
+      loading: false,
+      logConnected: false,
+
+      stats: { posts: 0, pages: 0, updated: '', loading: true },
+      pages: [],
+      logs: [],
+
+      steps: {
+        step1: { status: 'idle', last_run: null },
+        step2: { status: 'idle', last_run: null },
+        step3: { status: 'idle', last_run: null },
+      },
+
+      // ── 계산 속성 ──────────────────────────────────────────
+      get setupProgress() {
+        const done = Object.values(this.steps).filter(s => s.status === 'success').length;
+        return Math.round((done / 3) * 100);
+      },
+
+      get anyRunning() {
+        return Object.values(this.steps).some(s => s.status === 'running');
+      },
+
+      get adsenseChecklist() {
+        return [
+          { label: '4개 필수 페이지 (Privacy, About, Contact, Disclaimer)', done: this.stats.pages >= 4 },
+          { label: 'STEP 1 — 블로그 연결 확인', done: this.steps.step1.status === 'success' },
+          { label: 'STEP 2 — 반응형 CSS 테마 적용', done: this.steps.step2.status === 'success' },
+          { label: 'STEP 3 — 필수 페이지 발행', done: this.steps.step3.status === 'success' },
+        ];
+      },
+
+      // ── 초기화 ────────────────────────────────────────────
+      async init() {
+        await Promise.all([this.loadStats(), this.loadPages(), this.loadStatus()]);
+        this.connectLogs();
+        // 자동 상태 폴링
+        setInterval(() => this.loadStatus(), 10000);
+        setInterval(() => this.loadStats(), 60000);
+      },
+
+      async refresh() {
+        this.loading = true;
+        await Promise.all([this.loadStats(), this.loadPages(), this.loadStatus()]);
+        this.loading = false;
+      },
+
+      // ── 데이터 로드 ───────────────────────────────────────
+      async loadStats() {
+        try {
+          const r = await fetch('/api/stats');
+          const d = await r.json();
+          if (d.ok) {
+            this.stats = { posts: d.posts, pages: d.pages, updated: d.updated, loading: false };
+          } else {
+            this.stats.loading = false;
+          }
+        } catch(e) {
+          this.stats.loading = false;
+        }
+      },
+
+      async loadPages() {
+        try {
+          const r = await fetch('/api/pages');
+          const d = await r.json();
+          if (d.ok) this.pages = d.pages;
+        } catch(e) {}
+      },
+
+      async loadStatus() {
+        try {
+          const r = await fetch('/api/status');
+          const d = await r.json();
+          for (const [k, v] of Object.entries(d)) {
+            if (this.steps[k]) this.steps[k] = v;
+          }
+        } catch(e) {}
+      },
+
+      // ── 파이프라인 실행 ───────────────────────────────────
+      async runStep(step) {
+        if (this.steps[step].status === 'running') return;
+        try {
+          const r = await fetch(`/api/run/${step}`, { method: 'POST' });
+          const d = await r.json();
+          if (d.ok) {
+            this.steps[step].status = 'running';
+            this.pollUntilDone();
+          } else {
+            alert(`오류: ${d.error}`);
+          }
+        } catch(e) {}
+      },
+
+      async runAll() {
+        if (this.anyRunning) return;
+        try {
+          const r = await fetch('/api/run/all', { method: 'POST' });
+          const d = await r.json();
+          if (d.ok) {
+            this.steps.step1.status = 'running';
+            this.pollUntilDone();
+          }
+        } catch(e) {}
+      },
+
+      pollUntilDone() {
+        const poll = async () => {
+          await this.loadStatus();
+          if (this.anyRunning) {
+            setTimeout(poll, 2000);
+          } else {
+            await Promise.all([this.loadStats(), this.loadPages()]);
+          }
+        };
+        setTimeout(poll, 1500);
+      },
+
+      // ── 페이지 삭제 ───────────────────────────────────────
+      async deletePage(id, title) {
+        if (!confirm(`"${title}" 페이지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+        try {
+          const r = await fetch(`/api/pages/${id}`, { method: 'DELETE' });
+          const d = await r.json();
+          if (d.ok) {
+            await this.loadPages();
+          } else {
+            alert(`삭제 실패: ${d.error}`);
+          }
+        } catch(e) {}
+      },
+
+      // ── SSE 로그 연결 ─────────────────────────────────────
+      connectLogs() {
+        const es = new EventSource('/api/logs/stream');
+
+        es.onopen = () => { this.logConnected = true; };
+
+        es.onmessage = (e) => {
+          const data = JSON.parse(e.data);
+          if (data.type === 'ping') return;
+          if (data.msg) {
+            this.logs.push(data);
+            if (this.logs.length > 400) this.logs.shift();  // 최대 400줄
+            this.$nextTick(() => {
+              const el = this.$refs.logContainer;
+              if (el) el.scrollTop = el.scrollHeight;  // 자동 스크롤
+            });
+          }
+        };
+
+        es.onerror = () => {
+          this.logConnected = false;
+          es.close();
+          setTimeout(() => this.connectLogs(), 5000);  // 5초 후 재연결
+        };
+      },
+
+      clearLogs() {
+        this.logs = [];
+        fetch('/api/logs/clear', { method: 'POST' });
+      },
+
+      // ── 스타일 헬퍼 ───────────────────────────────────────
+      statusText(step) {
+        const map = { idle: '대기', running: '실행 중', success: '완료', failed: '실패' };
+        return map[this.steps[step].status] || '대기';
+      },
+
+      dotColor(step) {
+        const map = { idle: 'bg-slate-600', running: 'bg-yellow-400', success: 'bg-green-400', failed: 'bg-red-400' };
+        return map[this.steps[step].status] || 'bg-slate-600';
+      },
+
+      labelColor(step) {
+        const map = { idle: 'text-slate-500', running: 'text-yellow-400', success: 'text-green-400', failed: 'text-red-400' };
+        return map[this.steps[step].status] || 'text-slate-500';
+      },
+
+      cardBorder(step) {
+        const map = {
+          idle: 'border-slate-800',
+          running: 'border-yellow-800/60',
+          success: 'border-green-900/60',
+          failed: 'border-red-900/60',
+        };
+        return map[this.steps[step].status] || 'border-slate-800';
+      },
+
+      logColor(level) {
+        const map = {
+          info:    'text-blue-400',
+          success: 'text-green-400',
+          error:   'text-red-400',
+          output:  'text-slate-300',
+          connected: 'text-yellow-400',
+        };
+        return map[level] || 'text-slate-400';
+      },
+    };
+  }
+  </script>
+
+</body>
+</html>
